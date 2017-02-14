@@ -11,6 +11,7 @@ import MetalPerformanceShaders
 import AVFoundation
 
 class MetalView: MTKView {
+    let semaphore = DispatchSemaphore(value: 3)
     
     var textureCache : CVMetalTextureCache?
     var imageTexture: MTLTexture?
@@ -57,8 +58,7 @@ class MetalView: MTKView {
         }
         
         imageTexture = CVMetalTextureGetTexture(metalTexture!)
-        colorPixelFormat = (imageTexture?.pixelFormat)!
-        drawableSize = CGSize(width: (imageTexture?.width)!, height: (imageTexture?.height)!)
+        drawableSize = CGSize(width: width, height: height)
     }
     
     public func snapshot() -> UIImage {
@@ -83,7 +83,8 @@ class MetalView: MTKView {
     override func draw(_ rect: CGRect) {
         super.draw(rect)
         
-        // @see http://qiita.com/shu223/items/3301a1e64757c0bd73ef
+        // @see https://developer.apple.com/library/content/samplecode/MetalShaderShowcase/Listings/MetalShaderShowcase_AAPLRenderer_mm.html
+        semaphore.wait()
         
         guard let texture = imageTexture else {
             return
@@ -95,17 +96,23 @@ class MetalView: MTKView {
             return
         }
         
+        // @see http://qiita.com/shu223/items/3301a1e64757c0bd73ef
+        
         let encoder: MTLComputeCommandEncoder = commandBuffer.makeComputeCommandEncoder()
         encoder.setComputePipelineState(pipeline!)
         encoder.setTexture(texture, at: 0)
         encoder.setTexture(drawable.texture, at: 1)
         
         let threads = MTLSize(width: 16, height: 16, depth: 1)
-        let threadgroups = MTLSize(width: (texture.width + threads.width - 1) / threads.width,
-                                   height: (texture.height + threads.height - 1) / threads.height,
+        let threadgroups = MTLSize(width: texture.width / threads.width,
+                                   height: texture.height / threads.height,
                                    depth: 1)
         encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threads)
         encoder.endEncoding()
+        
+        commandBuffer.addCompletedHandler { _ in
+            self.semaphore.signal()
+        }
         
         commandBuffer.present(drawable)
         commandBuffer.commit()
