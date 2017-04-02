@@ -17,9 +17,7 @@ class MetalView: MTKView {
     var imageTexture: MTLTexture?
     
     var commandQueue: MTLCommandQueue?
-    var library: MTLLibrary?
-    var vertexBuffer: MTLBuffer?
-    var pipeline: MTLComputePipelineState?
+    var pipeline: MTLRenderPipelineState?
     var textureLoader: MTKTextureLoader?
     
     required init(coder: NSCoder) {
@@ -32,13 +30,21 @@ class MetalView: MTKView {
         textureLoader = MTKTextureLoader(device: device!)
         
         commandQueue = device?.makeCommandQueue()
-        library = device?.newDefaultLibrary()
         
-        guard let function = library?.makeFunction(name: "kernel_passthrough") else {
+        let library = device?.newDefaultLibrary()
+        guard
+            let vertex = library?.makeFunction(name: "mapTexture"),
+            let fragment = library?.makeFunction(name: "displayTexture")
+        else {
             fatalError()
         }
         
-        pipeline = try! device?.makeComputePipelineState(function: function)
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+        descriptor.sampleCount = sampleCount
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        pipeline = try! device?.makeRenderPipelineState(descriptor: descriptor)
     }
     
     public func setPixelBuffer(_ buffer: CVPixelBuffer) {
@@ -86,28 +92,19 @@ class MetalView: MTKView {
         // @see https://developer.apple.com/library/content/samplecode/MetalShaderShowcase/Listings/MetalShaderShowcase_AAPLRenderer_mm.html
         semaphore.wait()
         
-        guard let texture = imageTexture else {
-            return
-        }
-        guard let drawable = currentDrawable else {
-            return
-        }
-        guard let commandBuffer = commandQueue?.makeCommandBuffer() else {
+        guard
+            let texture = imageTexture,
+            let drawable = currentDrawable,
+            let commandBuffer = commandQueue?.makeCommandBuffer(),
+            let descriptor = currentRenderPassDescriptor
+        else {
             return
         }
         
-        // @see http://qiita.com/shu223/items/3301a1e64757c0bd73ef
-        
-        let encoder: MTLComputeCommandEncoder = commandBuffer.makeComputeCommandEncoder()
-        encoder.setComputePipelineState(pipeline!)
-        encoder.setTexture(texture, at: 0)
-        encoder.setTexture(drawable.texture, at: 1)
-        
-        let threads = MTLSize(width: 16, height: 16, depth: 1)
-        let threadgroups = MTLSize(width: texture.width / threads.width,
-                                   height: texture.height / threads.height,
-                                   depth: 1)
-        encoder.dispatchThreadgroups(threadgroups, threadsPerThreadgroup: threads)
+        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+        encoder.setRenderPipelineState(pipeline!)
+        encoder.setFragmentTexture(texture, at: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4, instanceCount: 1)
         encoder.endEncoding()
         
         commandBuffer.addCompletedHandler { _ in
