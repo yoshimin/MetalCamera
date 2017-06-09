@@ -25,6 +25,8 @@ class MetalView: MTKView {
     required init(coder: NSCoder) {
         super.init(coder: coder)
         device = MTLCreateSystemDefaultDevice()
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device!, nil, &textureCache)
+        
         framebufferOnly = false
         autoResizeDrawable = false
         clearColor = MTLClearColor(red: 1, green: 1, blue: 1, alpha: 1)
@@ -43,8 +45,6 @@ class MetalView: MTKView {
     
     public func setPixelBuffer(_ buffer: CVPixelBuffer) {
         // @see http://qiita.com/shu223/items/2e493645e2d9a1e35a0d
-        
-        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device!, nil, &textureCache)
         
         let width = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
